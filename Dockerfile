@@ -76,6 +76,8 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+# Copy prisma.config.ts so `prisma migrate deploy --config prisma.config.ts` works inside the container
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 # Copy the generated Prisma client from the builder stage
 COPY --from=builder /app/src/generated ./src/generated
 COPY --from=builder /app/next.config.mjs ./next.config.mjs

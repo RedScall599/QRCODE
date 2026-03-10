@@ -66,8 +66,9 @@ jobs:
 
       # Apply any pending Prisma migrations to the CI database
       # -T disables pseudo-TTY (required for non-interactive CI environments)
+      # --config points explicitly to prisma.config.ts so Prisma finds it
       - name: Run migrations
-        run: docker compose exec -T app npx prisma migrate deploy
+        run: docker compose exec -T app npx prisma migrate deploy --config prisma.config.ts
 
       # Run the test suite — the job fails here if any tests fail,
       # which blocks the deploy job from running
@@ -114,7 +115,7 @@ jobs:
             docker compose up --build -d
 
             # Apply any new Prisma migrations that came in with the pull
-            docker compose exec -T app npx prisma migrate deploy
+            docker compose exec -T app npx prisma migrate deploy --config prisma.config.ts
 
             # Remove leftover dangling images to free disk space
             docker image prune -f
