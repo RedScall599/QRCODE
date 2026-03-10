@@ -42,6 +42,11 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
 
+    # Required for pushing the Docker image to GitHub Container Registry
+    permissions:
+      contents: read
+      packages: write
+
     env:
       # Injected from secrets so the app can connect to the database during CI
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -51,15 +56,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Set up Docker Buildx — ensures Docker and docker compose are available
-      # on the runner and enables advanced build features (caching, multi-platform)
+      # Set up Docker Buildx — enables layer caching and advanced build features
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Build Docker images defined in docker-compose.yml
-      # This catches any Dockerfile errors before trying to start services
-      - name: Build containers
-        run: docker compose build
+      # Log in to GitHub Container Registry using the auto-generated GITHUB_TOKEN.
+      # No extra secret needed — GitHub provides this token automatically.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build the image ONCE on GitHub's fast runners and push to GHCR.
+      # Layer caching means repeated builds only rebuild what changed — skipping
+      # unchanged layers (node_modules, base image, etc.) makes this much faster.
+      # EC2 will pull this pre-built image instead of building from scratch.
+      - name: Build and push image to GHCR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/redscall599/qrcode:latest
+          # Cache layers to/from GHCR so subsequent CI runs only rebuild changes
+          cache-from: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache
+          cache-to: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache,mode=max
+
+      # Pull the freshly built image so docker compose can start it for testing.
+      # No --build flag needed — image was already built and pushed above.
+      - name: Pull image for testing
+        run: docker compose pull app
 
       # Start the app and database containers in the background
       - name: Start services
@@ -119,14 +146,20 @@ jobs:
               git clone https://github.com/RedScall599/QRCODE.git ${{ secrets.EC2_PROJECT_PATH }}
             fi
 
-            # Pull latest code from main
+            # Pull latest code from main (docker-compose.yml updates, .env changes, etc.)
             cd ${{ secrets.EC2_PROJECT_PATH }} && git pull origin main
 
-            # Stop running containers (graceful shutdown before rebuild)
+            # Pull the pre-built image from GHCR — GitHub Actions already built it,
+            # so EC2 just downloads the finished image instead of rebuilding everything.
+            # NOTE: If your GitHub repo/package is private, make your GHCR package public:
+            #       GitHub → Packages → qrcode → Package settings → Change visibility → Public
+            docker pull ghcr.io/redscall599/qrcode:latest
+
+            # Stop running containers (graceful shutdown before swapping the image)
             docker compose down
 
-            # Rebuild images and start containers in the background
-            docker compose up --build -d
+            # Start containers with the newly pulled image — no --build flag needed
+            docker compose up -d
 
             # Apply any new Prisma migrations that came in with the pull
             docker compose exec -T app npx prisma migrate deploy --config prisma.config.ts

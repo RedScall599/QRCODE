@@ -53,8 +53,13 @@ services:
   # ── Application ───────────────────────────────────────────────────────────
   app:
     # Build the Next.js image using the Dockerfile in this directory.
-    # Re-run `docker compose up --build` whenever you change code.
+    # Re-run `docker compose up --build` whenever you change code locally.
     build: .
+
+    # The image name used when pushing to / pulling from GitHub Container Registry.
+    # CI builds and pushes this image; EC2 pulls it instead of rebuilding from source.
+    # Make this package public in GitHub: Packages → qrcode → Settings → Public
+    image: ghcr.io/redscall599/qrcode:latest
 
     # Restart automatically unless you explicitly run `docker compose stop`
     restart: unless-stopped
