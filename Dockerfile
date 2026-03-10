@@ -80,6 +80,8 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 # Copy the generated Prisma client from the builder stage
 COPY --from=builder /app/src/generated ./src/generated
+# Copy smoke tests so `npm test` can run inside the container
+COPY --from=builder /app/src/tests ./src/tests
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 # Expose the port the application listens on. Next.js default is 3000.
