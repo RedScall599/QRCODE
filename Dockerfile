@@ -29,14 +29,14 @@ RUN npm ci
 # dependency installation so that code changes don't force re-installing deps.
 COPY . .
 
+# Generate the Prisma client BEFORE building. The Next.js build imports the
+# generated client, so it must exist before `npm run build` runs or the
+# build will fail with "cannot find module ../generated/prisma/client".
+RUN npx prisma generate
+
 # Build the Next.js application into the `.next` directory. This produces
 # optimized production assets (server bundles, static pages, client assets).
 RUN npm run build
-
-# Generate the Prisma client here in the builder stage. Generating the client
-# at build time ensures the generated client code is present in the final
-# runtime without requiring the Prisma CLI or devDependencies in the runtime image.
-RUN npx prisma generate
 
 
 # -------------------------
@@ -67,7 +67,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/next.config.js ./next.config.js
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 # Expose the port the application listens on. Next.js default is 3000.
 EXPOSE 3000
