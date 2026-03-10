@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import QRCode from "qrcode";
 
 export default function Home() {
@@ -52,16 +53,6 @@ export default function Home() {
       .catch(() => router.replace("/auth"));
   }, [router]);
 
-  // Load history when switching to history view
-  useEffect(() => {
-    if (view === "history" && user) loadHistory();
-  }, [view, user]);
-
-  // Scroll chat to bottom on new messages
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatMessages]);
-
   const loadHistory = async () => {
     setHistoryLoading(true);
     const res = await fetch("/api/qrcodes");
@@ -69,6 +60,18 @@ export default function Home() {
     setHistory(data.qrCodes || []);
     setHistoryLoading(false);
   };
+
+  // Load history when switching to history view
+  useEffect(() => {
+    if (view === "history" && user) {
+      Promise.resolve().then(() => loadHistory());
+    }
+  }, [view, user]);
+
+  // Scroll chat to bottom on new messages
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
 
   const generateQR = async () => {
     let qrContent = text.trim();
@@ -361,7 +364,7 @@ export default function Home() {
                   <p className="text-xs text-zinc-500">The image will be hosted and the QR code will open it when scanned.</p>
                   {imagePreview ? (
                     <div className="flex items-center gap-3 rounded-lg border border-zinc-600 bg-zinc-700/40 p-3">
-                      <img src={imagePreview} alt="preview" className="h-16 w-16 rounded-lg object-cover border border-zinc-600" />
+                      <Image src={imagePreview} alt="preview" width={64} height={64} className="h-16 w-16 rounded-lg object-cover border border-zinc-600" />
                       <div className="flex flex-col gap-1 min-w-0 flex-1">
                         <span className="text-sm text-zinc-200 truncate">{imageFile?.name}</span>
                         <span className="text-xs text-zinc-500">{imageFile ? (imageFile.size / 1024).toFixed(1) + " KB" : ""}</span>
@@ -486,7 +489,7 @@ export default function Home() {
                 {chatMessages.length === 0 && (
                   <div className="flex flex-1 items-center justify-center h-full">
                     <p className="text-center text-sm text-zinc-500 px-4">
-                      Ask anything — e.g. "What should I put in my QR code?" or "What URL formats work best?"
+                      Ask anything — e.g. &quot;What should I put in my QR code?&quot; or &quot;What URL formats work best?&quot;
                     </p>
                   </div>
                 )}
