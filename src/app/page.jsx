@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import QRCode from "qrcode";
 
 export default function Home() {
@@ -361,7 +362,7 @@ export default function Home() {
                   <p className="text-xs text-zinc-500">The image will be hosted and the QR code will open it when scanned.</p>
                   {imagePreview ? (
                     <div className="flex items-center gap-3 rounded-lg border border-zinc-600 bg-zinc-700/40 p-3">
-                      <img src={imagePreview} alt="preview" className="h-16 w-16 rounded-lg object-cover border border-zinc-600" />
+                      <Image src={imagePreview} alt="preview" width={64} height={64} className="h-16 w-16 rounded-lg object-cover border border-zinc-600" />
                       <div className="flex flex-col gap-1 min-w-0 flex-1">
                         <span className="text-sm text-zinc-200 truncate">{imageFile?.name}</span>
                         <span className="text-xs text-zinc-500">{imageFile ? (imageFile.size / 1024).toFixed(1) + " KB" : ""}</span>
