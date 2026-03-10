@@ -60,10 +60,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Copy only the package manifests and install production dependencies.
-# Installing only production deps (`--omit=dev`) keeps the image small and
-# avoids shipping dev-only packages into production.
+# --omit=dev        skips devDependencies to keep the image small.
+# --ignore-scripts  skips the postinstall script (prisma generate) — the
+#                   Prisma client is already generated in the builder stage
+#                   and will be copied below, so running it again here would
+#                   fail because prisma/schema.prisma is not present yet.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy built Next.js output and necessary runtime assets from the builder stage.
 # - `.next` contains the compiled application server and client bundles.
@@ -73,7 +76,9 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/next.config.js ./next.config.js
+# Copy the generated Prisma client from the builder stage
+COPY --from=builder /app/src/generated ./src/generated
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
 
 # Expose the port the application listens on. Next.js default is 3000.
 EXPOSE 3000
