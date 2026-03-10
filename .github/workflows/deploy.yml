@@ -1,0 +1,98 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD Pipeline — QR Code Generator
+#
+# JOBS:
+#   lint   → runs on every push and every pull request to "main"
+#              - installs dependencies and runs ESLint
+#              - acts as a gate: deploy won't run if lint fails
+#
+#   deploy → runs ONLY when code is pushed/merged into "main"
+#              - SSHs into your EC2 server
+#              - pulls the latest code from GitHub
+#              - rebuilds and restarts the Docker containers
+#              - runs any pending Prisma migrations
+#
+# ─── REQUIRED GITHUB SECRETS ────────────────────────────────────────────────
+# Add these in: GitHub repo → Settings → Secrets and variables → Actions
+#
+#   EC2_HOST          IP address of your EC2 instance  (e.g. 34.230.24.49)
+#   EC2_USER          SSH username                      (e.g. ubuntu)
+#   EC2_SSH_KEY       Full contents of your .pem file  (the private key text)
+#   EC2_PROJECT_PATH  Absolute path to the project on the server
+#                     (e.g. /home/ubuntu/QRCODE)
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]       # triggers lint + deploy
+  pull_request:
+    branches: [main]       # triggers lint only (deploy is skipped on PRs)
+
+jobs:
+
+  # ── Job 1: Lint ─────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Set up Node.js 20 (matches the version used in the Dockerfile)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm           # caches node_modules between runs for speed
+
+      # Install exact dependency versions from package-lock.json
+      - name: Install dependencies
+        run: npm ci
+
+      # Run ESLint — fails the job (and blocks deploy) if there are errors
+      - name: Run ESLint
+        run: npm run lint
+
+  # ── Job 2: Deploy ───────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: lint              # only runs if the lint job passed
+    # Skip deploy on pull requests — only deploy when code lands on main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      # SSH into the EC2 server and run the deploy commands remotely.
+      # Uses the popular appleboy/ssh-action to handle the SSH connection.
+      - name: SSH into EC2 and deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # Commands run in order on the remote server:
+          script: |
+            set -e   # stop immediately if any command fails
+
+            # Navigate to the project directory on the server
+            cd ${{ secrets.EC2_PROJECT_PATH }}
+
+            # Pull the latest code from GitHub
+            git pull origin main
+
+            # Rebuild and restart containers in detached (background) mode.
+            # --build forces a fresh image build to pick up code changes.
+            # -d     runs containers in the background.
+            docker compose up --build -d
+
+            # Apply any new Prisma database migrations that came in with the pull.
+            # -T disables pseudo-TTY allocation (required for non-interactive CI use).
+            docker compose exec -T app npx prisma migrate deploy
+
+            # Remove dangling images left over from the rebuild to free disk space.
+            docker image prune -f

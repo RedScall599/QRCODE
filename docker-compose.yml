@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — QR Code Generator
+#
+# Defines two services that run together:
+#   1. db  — PostgreSQL database (stores users, sessions, QR history)
+#   2. app — Next.js application (the QR generator + AI chat)
+#
+# Usage:
+#   Start:   docker compose up --build
+#   Stop:    docker compose down
+#   Logs:    docker compose logs -f
+#   Shell:   docker compose exec app sh
+#
+# First-time database setup (run after first `docker compose up`):
+#   docker compose exec app npx prisma migrate deploy
+#
+# Required — create a .env file in this directory with:
+#   OPENAI_API_KEY=sk-...
+#   JWT_SECRET=some_long_random_secret
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Database ─────────────────────────────────────────────────────────────
+  db:
+    # Official lightweight PostgreSQL 16 image (Alpine = smaller footprint)
+    image: postgres:16-alpine
+
+    # Automatically restart the container if it crashes or the host reboots
+    restart: unless-stopped
+
+    environment:
+      # Credentials used to create the database on first launch.
+      # These must match the DATABASE_URL in the app service below.
+      POSTGRES_USER: qruser
+      POSTGRES_PASSWORD: qrpassword
+      POSTGRES_DB: qrcode
+
+    volumes:
+      # Named volume — database files are stored outside the container so data
+      # survives container restarts, rebuilds, and `docker compose down`.
+      # To wipe the DB and start fresh: docker compose down -v
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      # Polls the DB until it is ready to accept connections before allowing
+      # the app container to start. Prevents "connection refused" errors on boot.
+      test: ["CMD-SHELL", "pg_isready -U qruser -d qrcode"]
+      interval: 5s   # check every 5 seconds
+      timeout: 5s    # fail the check if no response within 5 seconds
+      retries: 5     # mark unhealthy after 5 consecutive failures
+
+  # ── Application ───────────────────────────────────────────────────────────
+  app:
+    # Build the Next.js image using the Dockerfile in this directory.
+    # Re-run `docker compose up --build` whenever you change code.
+    build: .
+
+    # Restart automatically unless you explicitly run `docker compose stop`
+    restart: unless-stopped
+
+    ports:
+      # Maps port 3000 inside the container to port 3000 on the host machine.
+      # Change the left side to use a different host port, e.g. "8080:3000"
+      - "3000:3000"
+
+    depends_on:
+      db:
+        # Wait until the db healthcheck passes before starting this container.
+        # Without this the app would crash trying to connect before Postgres is ready.
+        condition: service_healthy
+
+    environment:
+      # Connection string for Prisma. "db" is the hostname Docker assigns to the
+      # db service — containers on the same Compose network resolve each other
+      # by service name automatically.
+      DATABASE_URL: postgresql://qruser:qrpassword@db:5432/qrcode
+
+      # Injected from your local .env file (never hard-code secrets here).
+      # OPENAI_API_KEY is used by /api/chat to call GPT-4o mini.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+
+      # Used to sign and verify JWT session tokens for authentication.
+      JWT_SECRET: ${JWT_SECRET}
+
+    volumes:
+      # Persists user-uploaded images (created in Image mode) so they survive
+      # container rebuilds. Without this volume, old QR codes pointing to
+      # uploaded images would return 404 after a redeploy.
+      - uploads_data:/app/public/uploads
+
+# ── Named volumes ─────────────────────────────────────────────────────────────
+# Docker manages these on the host. They persist until you run:
+#   docker compose down -v   (removes volumes — deletes all data)
+volumes:
+  postgres_data:   # Postgres database files
+  uploads_data:    # User-uploaded images served at /uploads/<filename>
