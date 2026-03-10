@@ -63,7 +63,9 @@ export default function Home() {
 
   // Load history when switching to history view
   useEffect(() => {
-    if (view === "history" && user) loadHistory();
+    if (view === "history" && user) {
+      Promise.resolve().then(() => loadHistory());
+    }
   }, [view, user]);
 
   // Scroll chat to bottom on new messages
