@@ -101,7 +101,7 @@ jobs:
 
             # Clone the repo on first deploy if the folder doesn't exist yet
             if [ ! -d ${{ secrets.EC2_PROJECT_PATH }} ]; then
-              git clone https://github.com/YOUR-USERNAME/YOUR-REPO.git ${{ secrets.EC2_PROJECT_PATH }}
+              git clone https://github.com/RedScall599/QRCODE.git ${{ secrets.EC2_PROJECT_PATH }}
             fi
 
             # Pull latest code from main
