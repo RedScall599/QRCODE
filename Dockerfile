@@ -22,6 +22,11 @@ WORKDIR /app
 # node_modules layer and skip re-installing dependencies on subsequent builds.
 COPY package.json package-lock.json ./
 
+# Copy the Prisma schema before running npm ci. The postinstall script runs
+# `prisma generate` automatically after install — it needs schema.prisma to
+# exist or it will fail with "schema file not found".
+COPY prisma ./prisma
+
 # Use `npm ci` for reproducible installs in CI/containers (faster and deterministic).
 RUN npm ci
 
