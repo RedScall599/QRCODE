@@ -129,6 +129,8 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          # Increase timeout to 30 minutes — docker pull + startup on small EC2 can be slow
+          command_timeout: 30m
           script: |
             set -e   # stop immediately if any command fails
 
@@ -137,7 +139,6 @@ jobs:
               echo "Docker not found — installing..."
               curl -fsSL https://get.docker.com | sh
               sudo usermod -aG docker $USER
-              # Apply group membership without requiring logout
               newgrp docker
             fi
 
@@ -149,20 +150,33 @@ jobs:
             # Pull latest code from main (docker-compose.yml updates, .env changes, etc.)
             cd ${{ secrets.EC2_PROJECT_PATH }} && git pull origin main
 
-            # Pull the pre-built image from GHCR — GitHub Actions already built it,
-            # so EC2 just downloads the finished image instead of rebuilding everything.
-            # NOTE: If your GitHub repo/package is private, make your GHCR package public:
+            # Pull the pre-built image from GHCR.
+            # EC2 downloads the finished image instead of rebuilding everything.
+            # NOTE: make your GHCR package public:
             #       GitHub → Packages → qrcode → Package settings → Change visibility → Public
             docker pull ghcr.io/redscall599/qrcode:latest
 
             # Stop running containers (graceful shutdown before swapping the image)
             docker compose down
 
-            # Start containers with the newly pulled image — no --build flag needed
+            # Run Prisma migrations as a one-shot container before starting the app.
+            # This avoids races where exec runs before the app process is ready.
+            docker compose run --rm --no-deps app \
+              npx prisma migrate deploy --config prisma.config.ts
+
+            # Start all containers with the newly pulled image in the background
             docker compose up -d
 
-            # Apply any new Prisma migrations that came in with the pull
-            docker compose exec -T app npx prisma migrate deploy --config prisma.config.ts
+            # Wait until the app container is healthy (up to 60 seconds).
+            # Exits as soon as the healthcheck passes so we don't waste time.
+            echo "Waiting for app to become healthy..."
+            timeout 60 sh -c \
+              'until [ "$(docker inspect -f "{{.State.Health.Status}}" $(docker compose ps -q app))" = "healthy" ]; do
+                sleep 3
+              done' || echo "Health check timed out — container may still be starting"
+
+            # Remove leftover dangling images to free disk space
+            docker image prune -f
 
             # Remove leftover dangling images to free disk space
             docker image prune -f

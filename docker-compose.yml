@@ -88,6 +88,16 @@ services:
       # Used to sign and verify JWT session tokens for authentication.
       JWT_SECRET: ${JWT_SECRET}
 
+    healthcheck:
+      # Polls the app's health endpoint every 10 seconds.
+      # The deploy script waits for this to pass before finishing.
+      # curl must be available in the container (it is in node:20-alpine with curl installed).
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ > /dev/null 2>&1 || exit 1"]
+      interval: 10s   # check every 10 seconds
+      timeout: 5s     # fail if no response within 5 seconds
+      retries: 6      # mark unhealthy after 6 failures (~1 minute total)
+      start_period: 15s  # give Next.js time to boot before the first check
+
     volumes:
       # Persists user-uploaded images (created in Image mode) so they survive
       # container rebuilds. Without this volume, old QR codes pointing to
