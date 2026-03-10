@@ -13,7 +13,7 @@ export default function Home() {
   const [authLoading, setAuthLoading] = useState(true);
   const [view, setView] = useState("generator"); // 'generator' | 'history'
 
-  // ── Chat state ───────────────────────────────────────────────────────────────
+  // ── Chat state ──────────────────────────────────────────────────────────────
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [chatStreaming, setChatStreaming] = useState(false);
