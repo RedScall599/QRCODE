@@ -59,34 +59,29 @@ WORKDIR /app
 # behavior based on NODE_ENV (, disabling verbose logs or dev-only checks).
 ENV NODE_ENV=production
 
-# Copy only the package manifests and install production dependencies.
-# --omit=dev        skips devDependencies to keep the image small.
-# --ignore-scripts  skips the postinstall script (prisma generate) — the
-#                   Prisma client is already generated in the builder stage
-#                   and will be copied below, so running it again here would
-#                   fail because prisma/schema.prisma is not present yet.
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
-
-# Copy built Next.js output and necessary runtime assets from the builder stage.
-# - `.next` contains the compiled application server and client bundles.
-# - `public` contains static assets like images and favicon.
-# - `prisma` contains runtime Prisma artifacts (schema, generated client files).
-# - `next.config.js` may be required at runtime for certain Next.js behaviors.
-COPY --from=builder /app/.next ./.next
+# Standalone output bundles only the exact server files needed to run the app.
+# No npm install required — all dependencies are already included by Next.js.
+COPY --from=builder /app/.next/standalone ./
+# Static assets (images, fonts, etc.) must be copied separately into the
+# location the standalone server expects: .next/static
+COPY --from=builder /app/.next/static ./.next/static
+# Public folder (favicon, uploaded images at runtime, etc.)
 COPY --from=builder /app/public ./public
+
+# Prisma: schema + migrations for `prisma migrate deploy` at startup
 COPY --from=builder /app/prisma ./prisma
-# Copy prisma.config.ts so `prisma migrate deploy --config prisma.config.ts` works inside the container
+# prisma.config.ts needed for --config flag in migrate commands
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-# Copy the generated Prisma client from the builder stage
+# Generated Prisma client — required at runtime by src/lib/prisma.js
 COPY --from=builder /app/src/generated ./src/generated
-# Copy smoke tests so `npm test` can run inside the container
+# Smoke tests — needed so `npm test` works inside the container in CI
 COPY --from=builder /app/src/tests ./src/tests
-COPY --from=builder /app/next.config.mjs ./next.config.mjs
+# package.json is needed for `npm test` to resolve the test script
+COPY --from=builder /app/package.json ./package.json
 
 # Expose the port the application listens on. Next.js default is 3000.
 EXPOSE 3000
 
-# Start the application using the package.json `start` script. The start
-# script should run Next.js in production mode (for example: `next start`).
-CMD ["npm", "run", "start"]
+# Run the standalone server directly with Node — no npm, no shell wrapper,
+# which is faster and produces cleaner process signals (SIGTERM handled properly).
+CMD ["node", "server.js"]
