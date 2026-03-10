@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── User ────────────────────────────────────────────────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  passwordHash  String
+  role          Role      @default(USER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions      Session[]
+  qrCodes       QRCode[]
+}
+
+// ─── Session (keeps users logged in) ─────────────────────────────────────────
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── QR Code (each user's generated codes) ───────────────────────────────────
+model QRCode {
+  id          String   @id @default(cuid())
+  userId      String
+  content     String
+  label       String?
+  size        Int      @default(256)
+  fgColor     String   @default("#000000")
+  bgColor     String   @default("#ffffff")
+  errorLevel  String   @default("M")
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+enum Role {
+  USER
+  ADMIN
+}
