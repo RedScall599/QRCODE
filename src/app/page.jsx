@@ -52,6 +52,14 @@ export default function Home() {
       .catch(() => router.replace("/auth"));
   }, [router]);
 
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    const res = await fetch("/api/qrcodes");
+    const data = await res.json();
+    setHistory(data.qrCodes || []);
+    setHistoryLoading(false);
+  };
+
   // Load history when switching to history view
   useEffect(() => {
     if (view === "history" && user) loadHistory();
@@ -61,14 +69,6 @@ export default function Home() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
-
-  const loadHistory = async () => {
-    setHistoryLoading(true);
-    const res = await fetch("/api/qrcodes");
-    const data = await res.json();
-    setHistory(data.qrCodes || []);
-    setHistoryLoading(false);
-  };
 
   const generateQR = async () => {
     let qrContent = text.trim();
@@ -486,7 +486,7 @@ export default function Home() {
                 {chatMessages.length === 0 && (
                   <div className="flex flex-1 items-center justify-center h-full">
                     <p className="text-center text-sm text-zinc-500 px-4">
-                      Ask anything — e.g. "What should I put in my QR code?" or "What URL formats work best?"
+                      Ask anything — e.g. &quot;What should I put in my QR code?&quot; or &quot;What URL formats work best?&quot;
                     </p>
                   </div>
                 )}
