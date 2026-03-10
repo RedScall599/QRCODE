@@ -23,6 +23,7 @@
     "react-dom": "19.2.3"
   },
   "devDependencies": {
+    "@prisma/internals": "^7.4.2",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "babel-plugin-react-compiler": "1.0.0",
