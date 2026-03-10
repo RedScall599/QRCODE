@@ -51,6 +51,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Set up Docker Buildx — ensures Docker and docker compose are available
+      # on the runner and enables advanced build features (caching, multi-platform)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       # Build Docker images defined in docker-compose.yml
       # This catches any Dockerfile errors before trying to start services
       - name: Build containers
