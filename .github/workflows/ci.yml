@@ -48,6 +48,7 @@ jobs:
       packages: write
 
     env:
+      # Injected from secrets so the app can connect to the database during CI
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
     steps:
@@ -55,32 +56,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Install Node.js so we can run Prisma and tests directly on the runner.
-      # This avoids Docker networking issues when running migrations.
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      # Install all dependencies (needed for prisma generate + running tests)
-      - name: Install dependencies
-        run: npm ci
-
-      # Generate the Prisma client from schema before running anything
-      - name: Generate Prisma client
-        run: npx prisma generate
-
-      # Run migrations directly on the runner against your Neon database.
-      # No Docker networking involved — connects straight to Neon via DATABASE_URL secret.
-      - name: Run migrations
-        run: npx prisma migrate deploy
-
-      # Run the smoke test directly on the runner — no Docker needed
-      - name: Run tests
-        run: npm test
-
-      # Set up Docker Buildx for building and pushing the image to GHCR
+      # Set up Docker Buildx — enables layer caching and advanced build features
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -94,6 +70,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Build the image ONCE on GitHub's fast runners and push to GHCR.
+      # Layer caching means repeated builds only rebuild what changed — skipping
+      # unchanged layers (node_modules, base image, etc.) makes this much faster.
       # EC2 will pull this pre-built image instead of building from scratch.
       - name: Build and push image to GHCR
         uses: docker/build-push-action@v5
@@ -101,9 +79,39 @@ jobs:
           context: .
           push: true
           tags: ghcr.io/redscall599/qrcode:latest
-          # Cache layers so subsequent CI runs only rebuild what changed
+          # Cache layers to/from GHCR so subsequent CI runs only rebuild changes
           cache-from: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache
           cache-to: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache,mode=max
+
+      # Pull the freshly built image so docker compose can start it for testing.
+      # No --build flag needed — image was already built and pushed above.
+      - name: Pull image for testing
+        run: docker compose pull app
+
+      # Start the app and database containers in the background
+      - name: Start services
+        run: docker compose up -d
+
+      # Give Postgres time to fully initialize before running migrations
+      - name: Wait for database
+        run: sleep 15
+
+      # Apply any pending Prisma migrations to the CI database
+      # -T disables pseudo-TTY (required for non-interactive CI environments)
+      # --config points explicitly to prisma.config.ts so Prisma finds it
+      - name: Run migrations
+        run: docker compose exec -T app npx prisma migrate deploy --config prisma.config.ts
+
+      # Run the test suite — the job fails here if any tests fail,
+      # which blocks the deploy job from running
+      - name: Run tests
+        run: docker compose exec -T app npm test
+
+      # Always clean up containers and volumes, even if a previous step failed
+      # -v removes volumes so the next run starts with a clean database
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
 
   # ── Job 2: Deploy to EC2 ───────────────────────────────────────────────────
   deploy:
@@ -130,35 +138,45 @@ jobs:
             if ! command -v docker &> /dev/null; then
               echo "Docker not found — installing..."
               curl -fsSL https://get.docker.com | sh
-              sudo usermod -aG docker "$USER"
-              echo "Docker installed. Re-run the pipeline — group membership needs a new session."
-              exit 1
+              sudo usermod -aG docker $USER
+              newgrp docker
             fi
-
-            PROJECT_PATH="${{ secrets.EC2_PROJECT_PATH }}"
 
             # Clone the repo on first deploy if the folder doesn't exist yet
-            if [ ! -d "$PROJECT_PATH" ]; then
-              git clone https://github.com/RedScall599/QRCODE.git "$PROJECT_PATH"
+            if [ ! -d ${{ secrets.EC2_PROJECT_PATH }} ]; then
+              git clone https://github.com/RedScall599/QRCODE.git ${{ secrets.EC2_PROJECT_PATH }}
             fi
 
-            # Pull latest code from main (docker-compose.yml, .env changes, etc.)
-            cd "$PROJECT_PATH" && git pull origin main
+            # Pull latest code from main (docker-compose.yml updates, .env changes, etc.)
+            cd ${{ secrets.EC2_PROJECT_PATH }} && git pull origin main
 
-            # Pull the pre-built image from GHCR instead of rebuilding on EC2
+            # Pull the pre-built image from GHCR.
+            # EC2 downloads the finished image instead of rebuilding everything.
+            # NOTE: make your GHCR package public:
+            #       GitHub → Packages → qrcode → Package settings → Change visibility → Public
             docker pull ghcr.io/redscall599/qrcode:latest
 
-            # Stop running containers before swapping the image
+            # Stop running containers (graceful shutdown before swapping the image)
             docker compose down
 
-            # Run migrations using the .env file on EC2 (must have Neon DATABASE_URL)
-            docker run --rm \
-              --env-file "$PROJECT_PATH/.env" \
-              ghcr.io/redscall599/qrcode:latest \
-              npx prisma migrate deploy
+            # Run Prisma migrations as a one-shot container before starting the app.
+            # This avoids races where exec runs before the app process is ready.
+            docker compose run --rm --no-deps app \
+              npx prisma migrate deploy --config prisma.config.ts
 
-            # Start all containers with the newly pulled image
+            # Start all containers with the newly pulled image in the background
             docker compose up -d
+
+            # Wait until the app container is healthy (up to 60 seconds).
+            # Exits as soon as the healthcheck passes so we don't waste time.
+            echo "Waiting for app to become healthy..."
+            timeout 60 sh -c \
+              'until [ "$(docker inspect -f "{{.State.Health.Status}}" $(docker compose ps -q app))" = "healthy" ]; do
+                sleep 3
+              done' || echo "Health check timed out — container may still be starting"
+
+            # Remove leftover dangling images to free disk space
+            docker image prune -f
 
             # Remove leftover dangling images to free disk space
             docker image prune -f

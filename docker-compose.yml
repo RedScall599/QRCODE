@@ -75,10 +75,10 @@ services:
         condition: service_healthy
 
     environment:
-      # Connection string for Prisma.
-      # - Locally / CI: set DATABASE_URL=postgresql://qruser:qrpassword@db:5432/qrcode in .env
-      # - On EC2: set DATABASE_URL to your Neon connection string in .env
-      DATABASE_URL: ${DATABASE_URL:-postgresql://qruser:qrpassword@db:5432/qrcode}
+      # Connection string for Prisma. "db" is the hostname Docker assigns to the
+      # db service — containers on the same Compose network resolve each other
+      # by service name automatically.
+      DATABASE_URL: postgresql://qruser:qrpassword@db:5432/qrcode
 
       # Injected from your local .env file (never hard-code secrets here).
       # OPENAI_API_KEY is used by /api/chat to call GPT-4o mini.
