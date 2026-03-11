@@ -16,7 +16,6 @@
 #
 # Required — create a .env file in this directory with:
 #   OPENAI_API_KEY=sk-...
-#   JWT_SECRET=some_long_random_secret
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -84,9 +83,6 @@ services:
       # Injected from your local .env file (never hard-code secrets here).
       # OPENAI_API_KEY is used by /api/chat to call GPT-4o mini.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-
-      # Used to sign and verify JWT session tokens for authentication.
-      JWT_SECRET: ${JWT_SECRET}
 
     healthcheck:
       # Polls the app's health endpoint every 10 seconds.

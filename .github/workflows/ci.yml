@@ -22,7 +22,7 @@
 #   DATABASE_URL      Full Postgres connection string for the CI database
 #   EC2_HOST          IP address of your EC2 instance  (e.g. 34.230.24.49)
 #   EC2_USER          SSH username                      (e.g. ubuntu)
-#   EC2_KEY           Full contents of your .pem file  (the private key text)
+#   EC2_SSH_KEY           Full contents of your .pem file  (the private key text)
 #   EC2_PROJECT_PATH  Absolute path to the project on the server
 #                     (e.g. /home/ubuntu/QRCODE)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ jobs:
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
+          key: ${{ secrets.EC2_KEY }}
           # Increase timeout to 30 minutes — docker pull + startup on small EC2 can be slow
           command_timeout: 30m
           script: |
