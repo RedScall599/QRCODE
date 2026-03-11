@@ -23,12 +23,6 @@ services:
     env_file:
       - .env
 
-    environment:
-      # These are fallback/defaults and can be omitted if always using .env
-      # DATABASE_URL: ${DATABASE_URL}
-      # OPENAI_API_KEY: ${OPENAI_API_KEY}
-      # Add other env vars you might need as needed
-
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ > /dev/null 2>&1 || exit 1"]
       interval: 10s
