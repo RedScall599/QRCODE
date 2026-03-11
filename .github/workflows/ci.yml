@@ -83,6 +83,12 @@ jobs:
           cache-from: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache
           cache-to: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache,mode=max
 
+      # Switch back to the default Docker context so docker compose commands
+      # can reach the host daemon (buildx-action creates its own context which
+      # docker compose doesn't know about, causing "permission denied" errors).
+      - name: Use default Docker context
+        run: docker context use default
+
       # Pull the freshly built image so docker compose can start it for testing.
       # No --build flag needed — image was already built and pushed above.
       - name: Pull image for testing
