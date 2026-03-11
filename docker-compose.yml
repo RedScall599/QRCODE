@@ -1,108 +1,43 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# docker-compose.yml — QR Code Generator
+# docker-compose.yml — QR Code Generator (PRODUCTION/EC2/NEON VERSION)
 #
-# Defines two services that run together:
-#   1. db  — PostgreSQL database (stores users, sessions, QR history)
-#   2. app — Next.js application (the QR generator + AI chat)
+# For EC2 deployment with Neon as the database:
+#   1. No db service is defined here; app connects directly to Neon via DATABASE_URL.
+#   2. Inject your Neon connection string during deploy (written to .env by your deploy script).
 #
-# Usage:
-#   Start:   docker compose up --build
-#   Stop:    docker compose down
-#   Logs:    docker compose logs -f
-#   Shell:   docker compose exec app sh
+# For local dev, you may keep a separate compose file that includes the db service.
 #
-# First-time database setup (run after first `docker compose up`):
-#   docker compose exec app npx prisma migrate deploy
-#
-# Required — create a .env file in this directory with:
+# Required: .env file at deploy time with:
+#   DATABASE_URL=postgresql://QR_CODE_ROLE:password@ep-holy-violet-adawc2de.c-2.us-east-1.aws.neon.tech/QR_CODE_DB?sslmode=require&channel_binding=require
 #   OPENAI_API_KEY=sk-...
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-
-  # ── Database ─────────────────────────────────────────────────────────────
-  db:
-    # Official lightweight PostgreSQL 16 image (Alpine = smaller footprint)
-    image: postgres:16-alpine
-
-    # Automatically restart the container if it crashes or the host reboots
-    restart: unless-stopped
-
-    environment:
-      # Credentials used to create the database on first launch.
-      # These must match the DATABASE_URL in the app service below.
-      POSTGRES_USER: qruser
-      POSTGRES_PASSWORD: qrpassword
-      POSTGRES_DB: qrcode
-
-    volumes:
-      # Named volume — database files are stored outside the container so data
-      # survives container restarts, rebuilds, and `docker compose down`.
-      # To wipe the DB and start fresh: docker compose down -v
-      - postgres_data:/var/lib/postgresql/data
-
-    healthcheck:
-      # Polls the DB until it is ready to accept connections before allowing
-      # the app container to start. Prevents "connection refused" errors on boot.
-      test: ["CMD-SHELL", "pg_isready -U qruser -d qrcode"]
-      interval: 5s   # check every 5 seconds
-      timeout: 5s    # fail the check if no response within 5 seconds
-      retries: 5     # mark unhealthy after 5 consecutive failures
-
-  # ── Application ───────────────────────────────────────────────────────────
   app:
-    # Build the Next.js image using the Dockerfile in this directory.
-    # Re-run `docker compose up --build` whenever you change code locally.
-    build: .
-
-    # The image name used when pushing to / pulling from GitHub Container Registry.
-    # CI builds and pushes this image; EC2 pulls it instead of rebuilding from source.
-    # Make this package public in GitHub: Packages → qrcode → Settings → Public
     image: ghcr.io/redscall599/qrcode:latest
-
-    # Restart automatically unless you explicitly run `docker compose stop`
     restart: unless-stopped
-
     ports:
-      # Maps port 3000 inside the container to port 3000 on the host machine.
-      # Change the left side to use a different host port, e.g. "8080:3000"
       - "3000:3000"
 
-    depends_on:
-      db:
-        # Wait until the db healthcheck passes before starting this container.
-        # Without this the app would crash trying to connect before Postgres is ready.
-        condition: service_healthy
+    # Reads env vars from the .env file (written by your deploy script from GitHub secrets)
+    env_file:
+      - .env
 
     environment:
-      # Connection string for Prisma. "db" is the hostname Docker assigns to the
-      # db service — containers on the same Compose network resolve each other
-      # by service name automatically.
-      DATABASE_URL: postgresql://qruser:qrpassword@db:5432/qrcode
-
-      # Injected from your local .env file (never hard-code secrets here).
-      # OPENAI_API_KEY is used by /api/chat to call GPT-4o mini.
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # These are fallback/defaults and can be omitted if always using .env
+      # DATABASE_URL: ${DATABASE_URL}
+      # OPENAI_API_KEY: ${OPENAI_API_KEY}
+      # Add other env vars you might need as needed
 
     healthcheck:
-      # Polls the app's health endpoint every 10 seconds.
-      # The deploy script waits for this to pass before finishing.
-      # curl must be available in the container (it is in node:20-alpine with curl installed).
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ > /dev/null 2>&1 || exit 1"]
-      interval: 10s   # check every 10 seconds
-      timeout: 5s     # fail if no response within 5 seconds
-      retries: 6      # mark unhealthy after 6 failures (~1 minute total)
-      start_period: 15s  # give Next.js time to boot before the first check
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
 
     volumes:
-      # Persists user-uploaded images (created in Image mode) so they survive
-      # container rebuilds. Without this volume, old QR codes pointing to
-      # uploaded images would return 404 after a redeploy.
       - uploads_data:/app/public/uploads
 
-# ── Named volumes ─────────────────────────────────────────────────────────────
-# Docker manages these on the host. They persist until you run:
-#   docker compose down -v   (removes volumes — deletes all data)
 volumes:
-  postgres_data:   # Postgres database files
-  uploads_data:    # User-uploaded images served at /uploads/<filename>
+  uploads_data:
