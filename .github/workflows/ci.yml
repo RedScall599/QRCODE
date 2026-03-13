@@ -1,41 +1,89 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Add these in: GitHub repo → Settings → Secrets and variables → Actions
+# CI/CD Pipeline — QR Code Generator
 #
-#   DATABASE_URL        Full Postgres connection string for the Neon (Remote) DB
-#   OPENAI_API_KEY      Your OpenAI API key (for AI chat in the app)
-#   EC2_HOST            IP address of your EC2 instance
-#   EC2_USER            SSH username
-#   EC2_SSH_KEY         Full contents of your .pem file (private key)
-#   EC2_PROJECT_PATH    Absolute path to the project on the server
+# What is CI/CD?
+#   CI  = Continuous Integration  → automatically build and test your code
+#                                    every time you push a change to GitHub.
+#   CD  = Continuous Deployment   → automatically deploy the app to your server
+#                                    when tests pass on the main branch.
+#
+# How this file works:
+#   GitHub reads this file and runs the jobs defined below whenever you push
+#   code. You don't have to do anything manually — it's all automatic.
+#
+# ─── SECRETS YOU MUST ADD ────────────────────────────────────────────────────
+# Secrets are like environment variables but stored securely in GitHub so
+# they are NEVER exposed in your code or logs.
+#
+# To add them: GitHub repo → Settings → Secrets and variables → Actions → New secret
+#
+#   DATABASE_URL        Your Neon PostgreSQL connection string
+#                       (found in the Neon dashboard under "Connection string")
+#   OPENAI_API_KEY      Your OpenAI API key (used by the AI chat feature)
+#   EC2_HOST            The public IP address of your EC2 server (e.g. 34.230.24.49)
+#   EC2_USER            The SSH login username on EC2 (almost always "ubuntu")
+#   EC2_KEY             The full contents of your .pem file (open it in Notepad,
+#                       copy everything including -----BEGIN RSA PRIVATE KEY-----)
+#   EC2_PROJECT_PATH    Where the project lives on EC2 (e.g. /home/ubuntu/QRCODE)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI/CD
 
+# ── When does this pipeline run? ─────────────────────────────────────────────
+# "on" defines the events that trigger the pipeline.
 on:
   push:
+    # Run on every push to main or develop branches.
+    # "main" is your production branch. "develop" is for feature work.
     branches: [main, develop]
   pull_request:
+    # Also run when someone opens a Pull Request targeting main.
+    # This lets you catch bugs BEFORE merging — the deploy job is skipped on PRs.
     branches: [main]
 
 jobs:
+
+  # ── Job 1: Build & Test ───────────────────────────────────────────────────
+  # This job builds a Docker image of your app, runs database migrations,
+  # and runs your test suite to make sure nothing is broken.
   build-and-test:
     name: Build & Test
+    # "runs-on" chooses the machine that will execute this job.
+    # "ubuntu-latest" means GitHub spins up a fresh Linux computer for free.
     runs-on: ubuntu-latest
+
+    # Permissions this job needs.
+    # "packages: write" lets it push the Docker image to GitHub's container registry.
     permissions:
       contents: read
       packages: write
 
+    # env vars are available to every step in this job, like a shared .env file.
+    # ${{ secrets.NAME }} reads the secret you saved in GitHub Settings.
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}    # <-- Add OpenAI secret here for test/CI
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
+      # ── Step 1: Get your code ──────────────────────────────────────────────
+      # The runner starts as a blank machine — this step downloads your repo
+      # onto it so subsequent steps can use your files.
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ── Step 2: Set up Docker Buildx ──────────────────────────────────────
+      # Buildx is an advanced Docker build tool. It enables:
+      #   - Build caching (skip re-downloading unchanged layers = faster builds)
+      #   - Multi-platform builds if needed
+      # Think of it as upgrading the default Docker builder to a faster version.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # ── Step 3: Log in to GitHub Container Registry (GHCR) ────────────────
+      # GHCR is GitHub's free Docker image hosting (like Docker Hub but built in).
+      # We log in so the next step can push (upload) the built image there.
+      # GITHUB_TOKEN is a special secret GitHub creates automatically — you don't
+      # need to create it yourself.
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -43,6 +91,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ── Step 4: Build the Docker image and push it to GHCR ────────────────
+      # This reads your Dockerfile, builds the app into a self-contained image,
+      # and uploads it to GHCR tagged as "latest".
+      #
+      # Why push to GHCR?
+      #   Later, your EC2 server will just DOWNLOAD this pre-built image instead
+      #   of building it from scratch. Building on EC2 is slow (small CPU/RAM).
+      #   Building here on GitHub's fast machines and shipping the result is much faster.
+      #
+      # cache-from / cache-to: On repeated builds, Docker reuses unchanged layers
+      # (e.g. if you only changed one file, it won't re-download all node_modules).
       - name: Build and push image to GHCR
         uses: docker/build-push-action@v5
         with:
@@ -52,80 +111,161 @@ jobs:
           cache-from: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache
           cache-to: type=registry,ref=ghcr.io/redscall599/qrcode:buildcache,mode=max
 
+      # ── Step 5: Pull the image for local testing ──────────────────────────
+      # docker compose needs the image to exist locally before it can start it.
+      # We just pushed it to GHCR, so now we pull it back down onto the runner.
       - name: Pull image for testing
         run: docker compose pull app
 
-      # Create a test .env for the app in CI (optional, if your app expects it even in CI env)
-      - name: Write .env for CI (optional, if needed)
+      # ── Step 6: Write a .env file for the running containers ──────────────
+      # docker compose reads a .env file in the project folder to get secrets.
+      # The runner doesn't have a .env file (it's gitignored), so we create one
+      # here by writing the GitHub secrets into it.
+      - name: Write .env for CI
         run: |
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
           echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
 
+      # ── Step 7: Start the app container ───────────────────────────────────
+      # "docker compose up -d" starts all services defined in docker-compose.yml.
+      # The "-d" flag means "detached" — runs in the background so your terminal
+      # (and the pipeline) isn't blocked waiting for it.
       - name: Start services
         run: docker compose up -d
 
+      # ── Step 8: Wait for the database ─────────────────────────────────────
+      # Even though the container started, PostgreSQL takes a few seconds to
+      # fully initialize. If we run migrations immediately it will fail with
+      # "connection refused". Sleeping 15 seconds gives it time to be ready.
       - name: Wait for database
         run: sleep 15
 
+      # ── Step 9: Run database migrations ───────────────────────────────────
+      # Prisma migrations update your database schema to match your schema.prisma file.
+      # "exec -T app" runs the command inside the already-running "app" container.
+      # "-T" disables a terminal feature that doesn't work in CI environments.
+      # "--config prisma.config.ts" tells Prisma where its config file lives.
       - name: Run migrations
         run: docker compose exec -T app npx prisma migrate deploy --config prisma.config.ts
 
+      # ── Step 10: Run tests ─────────────────────────────────────────────────
+      # Runs your test suite (defined in package.json "test" script) inside the
+      # app container. If any test fails, this step fails and the whole pipeline
+      # stops — the deploy job will NOT run, protecting your production server.
       - name: Run tests
         run: docker compose exec -T app npm test
 
+      # ── Step 11: Tear down ────────────────────────────────────────────────
+      # Stop and remove all containers and volumes created during this job.
+      # "if: always()" means this runs even if a previous step failed — so you
+      # never leave orphaned containers running on the GitHub machine.
+      # "-v" removes the database volume so the next run starts with a clean DB.
       - name: Tear down
         if: always()
         run: docker compose down -v
 
+  # ── Job 2: Deploy to EC2 ─────────────────────────────────────────────────
+  # This job only runs when:
+  #   1. Job 1 (build-and-test) passed successfully
+  #   2. The trigger was a push to "main" (not a PR, not develop)
+  #
+  # It SSHs into your EC2 server and updates the running app there.
   deploy:
     name: Deploy to EC2
     runs-on: ubuntu-latest
+    # "needs" means this job waits for build-and-test to finish first.
     needs: build-and-test
+    # Only deploy on direct pushes to main — skip for PRs and develop pushes.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
+      # ── Step 1: SSH into EC2 and run deploy commands ──────────────────────
+      # appleboy/ssh-action connects to your server over SSH and runs the
+      # "script" block remotely, as if you typed each command into a terminal
+      # on your EC2 machine.
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
+          # How long to wait before giving up. Default is 10 min which is too
+          # short for docker pull on a small EC2. 30 min gives plenty of headroom.
           command_timeout: 30m
           script: |
+            # "set -e" means: stop immediately if any command fails.
+            # Without this, the script would keep running even after an error.
             set -e
 
+            # ── Install Docker if it isn't on the server yet ───────────────
+            # "command -v docker" checks if docker is installed.
+            # "&> /dev/null" silences the output — we only care about success/fail.
             if ! command -v docker &> /dev/null; then
               echo "Docker not found — installing..."
+              # This is Docker's official one-line install script for Linux.
               curl -fsSL https://get.docker.com | sh
+              # Add the current user to the "docker" group so they can run
+              # docker commands without needing "sudo" every time.
               sudo usermod -aG docker $USER
+              # newgrp applies the new group to the current session.
               newgrp docker
             fi
 
+            # ── Clone the repo if this is the first deploy ─────────────────
+            # On the very first run the project folder won't exist yet.
+            # This clones it. On every run after, it already exists so we skip this.
             if [ ! -d ${{ secrets.EC2_PROJECT_PATH }} ]; then
               git clone https://github.com/RedScall599/QRCODE.git ${{ secrets.EC2_PROJECT_PATH }}
             fi
 
+            # ── Pull the latest code ───────────────────────────────────────
+            # Switch into the project folder and download the newest commits from main.
+            # This updates docker-compose.yml and any other config files.
             cd ${{ secrets.EC2_PROJECT_PATH }} && git pull origin main
 
+            # ── Download the pre-built Docker image ───────────────────────
+            # The build-and-test job already built and pushed this image to GHCR.
+            # We just download the finished image here — much faster than building
+            # it from scratch on the EC2 server.
             docker pull ghcr.io/redscall599/qrcode:latest
 
+            # ── Stop the currently running containers ─────────────────────
+            # We bring everything down before starting new containers so there
+            # are no conflicts with the old version still running.
             docker compose down
 
-            # --- INJECT ENV SECRETS FOR EC2 DOCKER APP ---
+            # ── Write the .env file on EC2 ────────────────────────────────
+            # The .env file holds secrets the app needs at runtime.
+            # It's never committed to git (it's in .gitignore), so we create it
+            # here by writing the GitHub secrets directly into it.
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
             echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
-            # Add other env vars similarly if needed
 
+            # ── Run database migrations ────────────────────────────────────
+            # "docker compose run --rm" starts a fresh temporary container just
+            # to run this one command, then removes it when done.
+            # "--no-deps" means don't start any other services (like the db),
+            # just run the app container for this one migration command.
+            # The app connects directly to Neon (remote DB) via DATABASE_URL.
             docker compose run --rm --no-deps app \
               npx prisma migrate deploy --config prisma.config.ts
 
+            # ── Start the app ─────────────────────────────────────────────
+            # Start all services defined in docker-compose.yml in the background.
+            # The app is now live on port 3000 using the newly pulled image.
             docker compose up -d
 
+            # ── Wait for the app to become healthy ────────────────────────
+            # The container starts immediately but the Next.js server inside it
+            # takes a few seconds to boot. This loop checks the Docker healthcheck
+            # every 3 seconds and waits up to 60 seconds before giving up.
             echo "Waiting for app to become healthy..."
             timeout 60 sh -c \
               'until [ "$(docker inspect -f "{{.State.Health.Status}}" $(docker compose ps -q app))" = "healthy" ]; do
                 sleep 3
               done' || echo "Health check timed out — container may still be starting"
 
-            docker image prune -f
+            # ── Clean up old images ────────────────────────────────────────
+            # Every time you deploy, the old Docker image becomes "dangling"
+            # (unused but still taking up disk space). This removes them.
             docker image prune -f

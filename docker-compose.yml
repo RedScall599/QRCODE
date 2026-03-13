@@ -1,37 +1,100 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# docker-compose.yml — QR Code Generator (PRODUCTION/EC2/NEON VERSION)
+# docker-compose.yml — QR Code Generator
 #
-# For EC2 deployment with Neon as the database:
-#   1. No db service is defined here; app connects directly to Neon via DATABASE_URL.
-#   2. Inject your Neon connection string during deploy (written to .env by your deploy script).
+# ── WHAT IS THIS FILE? ───────────────────────────────────────────────────────
+# Docker Compose is a tool that lets you define and run your app using a simple
+# text file instead of typing long "docker run" commands in the terminal.
 #
-# For local dev, you may keep a separate compose file that includes the db service.
+# This file tells Docker:
+#   - Which container (image) to run
+#   - Which port to open so you can visit the app in a browser
+#   - Where to find the secret environment variables (like your API keys)
+#   - How to check if the app is healthy and running
+#   - Where to store uploaded files so they aren't lost when the container restarts
 #
-# Required: .env file at deploy time with:
-#   DATABASE_URL=postgresql://QR_CODE_ROLE:password@ep-holy-violet-adawc2de.c-2.us-east-1.aws.neon.tech/QR_CODE_DB?sslmode=require&channel_binding=require
-#   OPENAI_API_KEY=sk-...
+# ── HOW THE DATABASE WORKS HERE ──────────────────────────────────────────────
+# This file does NOT define a local database container. Instead, the app
+# connects to Neon — a cloud-hosted PostgreSQL database. The connection string
+# (DATABASE_URL) is stored in a .env file on the EC2 server and never
+# hard-coded here. This keeps your credentials safe and out of GitHub.
+#
+# ── USEFUL COMMANDS ──────────────────────────────────────────────────────────
+#   Start the app:         docker compose up -d
+#   Stop the app:          docker compose down
+#   View live logs:        docker compose logs -f
+#   Open a shell inside:   docker compose exec app sh
+#   Check running status:  docker compose ps
+#
+# ── REQUIRED .env FILE ───────────────────────────────────────────────────────
+# Create a .env file in the same folder as this file on your EC2 server with:
+#   DATABASE_URL=postgresql://...   ← your Neon connection string
+#   OPENAI_API_KEY=sk-...           ← your OpenAI key
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  app:
-    image: ghcr.io/redscall599/qrcode:latest
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
 
-    # Reads env vars from the .env file (written by your deploy script from GitHub secrets)
+  # ── App Container ───────────────────────────────────────────────────────────
+  # A "service" is one running container. We only have one here — the Next.js app.
+  app:
+
+    # The Docker image to run. This is the pre-built image that GitHub Actions
+    # builds and pushes to GitHub Container Registry (GHCR) on every deploy.
+    # Instead of building the code on the server (slow), we just download this
+    # ready-to-run image (fast).
+    image: ghcr.io/redscall599/qrcode:latest
+
+    # If the container crashes for any reason, Docker will automatically restart it.
+    # "unless-stopped" means it also starts again if the server reboots — but NOT
+    # if you manually stopped it with "docker compose down".
+    restart: unless-stopped
+
+    ports:
+      # This maps a port on your EC2 server to a port inside the container.
+      # Format is "HOST_PORT:CONTAINER_PORT".
+      # So visiting http://your-ec2-ip:3000 in a browser talks to port 3000 inside
+      # the container where Next.js is listening.
+      - "80:3000"
+
+    # env_file tells Docker to read a .env file and inject every line as an
+    # environment variable into the container. This is how the app gets secrets
+    # like DATABASE_URL and OPENAI_API_KEY without them being written in this file.
+    # Make sure the .env file exists on the server before running docker compose up.
     env_file:
       - .env
 
     healthcheck:
+      # Docker periodically runs this command inside the container to check if
+      # the app is actually working (not just started, but responding to requests).
+      # "wget -qO-" makes a silent HTTP request to the app's homepage.
+      # If it fails, Docker marks the container as "unhealthy".
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ > /dev/null 2>&1 || exit 1"]
+
+      # How often to run the health check (every 10 seconds)
       interval: 10s
+
+      # If the app doesn't respond within 5 seconds, count it as a failure
       timeout: 5s
+
+      # After 6 consecutive failures (~1 minute), mark the container as unhealthy
       retries: 6
+
+      # Wait 15 seconds after the container starts before running the first check.
+      # Next.js takes a few seconds to boot up — this prevents false failures.
       start_period: 15s
 
     volumes:
+      # A "volume" is a folder that persists outside the container.
+      # Without this, any images users upload would be deleted every time
+      # the container restarts or is updated. This volume saves uploaded files
+      # to the server's disk so they survive deployments.
+      # "uploads_data" is the volume name (defined below), and it maps to the
+      # /app/public/uploads folder inside the container.
       - uploads_data:/app/public/uploads
 
+# ── Named Volumes ──────────────────────────────────────────────────────────────
+# Volumes listed here are managed by Docker. They live on the server's disk
+# and survive container restarts and rebuilds.
+# To delete all volumes and start fresh: docker compose down -v
+# WARNING: "down -v" will delete all uploaded images permanently.
 volumes:
-  uploads_data:
+  uploads_data:   # Stores user-uploaded images served at /uploads/<filename>
