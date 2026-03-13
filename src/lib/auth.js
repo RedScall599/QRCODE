@@ -36,7 +36,7 @@ export async function getSessionUser() {
 export function setSessionCookie(cookieStore, token) {
   cookieStore.set("session", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.SECURE_COOKIES === "true",
     sameSite: "lax",
     maxAge: 60 * 60 * 24 * 30,
     path: "/",

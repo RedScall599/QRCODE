@@ -240,6 +240,10 @@ jobs:
             # here by writing the GitHub secrets directly into it.
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
             echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+            # SECURE_COOKIES=false because EC2 is served over HTTP (not HTTPS).
+            # Setting this to true would cause browsers to silently discard the
+            # session cookie, making login appear to succeed but never stick.
+            echo "SECURE_COOKIES=false" >> .env
 
             # ── Run database migrations ────────────────────────────────────
             # "docker compose run --rm" starts a fresh temporary container just
