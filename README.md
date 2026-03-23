@@ -73,3 +73,4 @@ This project is deployed automatically to AWS EC2 using GitHub Actions. Every pu
 4. SSHs into EC2 and deploys the new image
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for a full beginner-friendly walkthrough of how the Docker and CI/CD setup works.
+see my wireframe here https://excalidraw.com/#json=7BwP8QHxC6k4lFuvUwp39,hcTbwMB2b4v0_Ak5VwsrWw
