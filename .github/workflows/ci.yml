@@ -204,11 +204,10 @@ jobs:
               echo "Docker not found — installing..."
               # This is Docker's official one-line install script for Linux.
               curl -fsSL https://get.docker.com | sh
-              # Add the current user to the "docker" group so they can run
-              # docker commands without needing "sudo" every time.
-              sudo usermod -aG docker $USER
-              # newgrp applies the new group to the current session.
-              newgrp docker
+              # Add the current user to the "docker" group for future interactive
+              # sessions. We use sudo for all docker commands below so newgrp is
+              # not needed (and doesn't persist in non-interactive SSH sessions).
+              sudo usermod -aG docker $USER || true
             fi
 
             # ── Clone the repo if this is the first deploy ─────────────────
@@ -227,12 +226,14 @@ jobs:
             # The build-and-test job already built and pushed this image to GHCR.
             # We just download the finished image here — much faster than building
             # it from scratch on the EC2 server.
-            docker pull ghcr.io/redscall599/qrcode:latest
+            # sudo is required because non-interactive SSH sessions don't inherit
+            # the docker group even if the user was added to it.
+            sudo docker pull ghcr.io/redscall599/qrcode:latest
 
             # ── Stop the currently running containers ─────────────────────
             # We bring everything down before starting new containers so there
             # are no conflicts with the old version still running.
-            docker compose down
+            sudo docker compose down
 
             # ── Write the .env file on EC2 ────────────────────────────────
             # The .env file holds secrets the app needs at runtime.
@@ -251,13 +252,13 @@ jobs:
             # "--no-deps" means don't start any other services (like the db),
             # just run the app container for this one migration command.
             # The app connects directly to Neon (remote DB) via DATABASE_URL.
-            docker compose run --rm --no-deps app \
+            sudo docker compose run --rm --no-deps app \
               npx prisma migrate deploy --config prisma.config.ts
 
             # ── Start the app ─────────────────────────────────────────────
             # Start all services defined in docker-compose.yml in the background.
             # The app is now live on port 3000 using the newly pulled image.
-            docker compose up -d
+            sudo docker compose up -d
 
             # ── Wait for the app to become healthy ────────────────────────
             # The container starts immediately but the Next.js server inside it
@@ -265,11 +266,11 @@ jobs:
             # every 3 seconds and waits up to 60 seconds before giving up.
             echo "Waiting for app to become healthy..."
             timeout 60 sh -c \
-              'until [ "$(docker inspect -f "{{.State.Health.Status}}" $(docker compose ps -q app))" = "healthy" ]; do
+              'until [ "$(sudo docker inspect -f "{{.State.Health.Status}}" $(sudo docker compose ps -q app))" = "healthy" ]; do
                 sleep 3
               done' || echo "Health check timed out — container may still be starting"
 
             # ── Clean up old images ────────────────────────────────────────
             # Every time you deploy, the old Docker image becomes "dangling"
             # (unused but still taking up disk space). This removes them.
-            docker image prune -f
+            sudo docker image prune -f
